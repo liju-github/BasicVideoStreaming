@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
 
@@ -25,7 +26,6 @@ type Client struct {
 type Room struct {
 	ID      string
 	Clients map[string]*Client
-	mu      sync.RWMutex
 }
 
 type Message struct {
@@ -47,19 +47,20 @@ func NewSignalingServer() *SignalingServer {
 	}
 }
 
-func (s *SignalingServer) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
+func (s *SignalingServer) HandleWebSocket(c *gin.Context) {
+	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		log.Printf("Upgrade error: %v", err)
-		http.Error(w, "Failed to upgrade connection", http.StatusInternalServerError)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upgrade connection"})
 		return
 	}
 	defer conn.Close()
 
-	roomID := r.URL.Query().Get("roomId")
-	clientID := r.URL.Query().Get("clientId")
+	roomID := c.Query("roomId")
+	clientID := c.Query("clientId")
 	if roomID == "" || clientID == "" {
 		log.Println("Missing roomId or clientId in request")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing roomId or clientId"})
 		return
 	}
 
@@ -167,12 +168,25 @@ func (s *SignalingServer) HandleWebSocket(w http.ResponseWriter, r *http.Request
 }
 
 func main() {
-	server := NewSignalingServer()
-	http.HandleFunc("/ws", server.HandleWebSocket)
-	http.Handle("/", http.FileServer(http.Dir(".")))
+	// Set Gin to release mode
+	gin.SetMode(gin.ReleaseMode)
 
+	// Create signaling server
+	server := NewSignalingServer()
+
+	// Create Gin router
+	r := gin.Default()
+
+	// WebSocket route
+	r.GET("/ws", server.HandleWebSocket)
+
+	// Serve static files with a specific group
+    r.GET("/", func(c *gin.Context) {
+        c.File("./index.html")
+    })
+    r.Static("/static", "./static")
+
+	// Start server
 	log.Println("Server starting on :8080")
-	if err := http.ListenAndServe(":8080", nil); err != nil {
-		log.Fatal(err)
-	}
+	r.Run(":8080")
 }
