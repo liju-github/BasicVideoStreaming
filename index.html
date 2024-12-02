@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Simple Video Chat</title>
+    <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body {
+            font-family: 'Google Sans', Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: #202124;
+            color: white;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #join-form {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #3c4043;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+
+        input {
+            display: block;
+            width: 250px;
+            padding: 12px;
+            margin: 10px 0;
+            border: 1px solid #5f6368;
+            border-radius: 4px;
+            background: #202124;
+            color: white;
+            font-size: 16px;
+        }
+
+        button {
+            background: #8ab4f8;
+            color: #202124;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background: #93bbf8;
+        }
+
+        #main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #videos {
+            flex: 1;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            padding: 20px;
+            align-items: center;
+            justify-items: center;
+        }
+
+        .video-container {
+            position: relative;
+            width: 100%;
+            max-width: 400px;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #3c4043;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            background: #3c4043;
+            transform: scaleX(-1);
+        }
+
+        .username-label {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 14px;
+            color: white;
+        }
+
+        #controls {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            gap: 20px;
+            background: #3c4043;
+        }
+
+        .control-button {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            transition: background 0.2s;
+        }
+
+        .control-button.active {
+            background: #8ab4f8;
+            color: #202124;
+        }
+
+        .control-button.inactive {
+            background: #ea4335;
+            color: white;
+        }
+
+        .control-button.leave {
+            background: #ea4335;
+            color: white;
+        }
+
+        #participant-count {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(60, 64, 67, 0.9);
+            padding: 8px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="join-form">
+        <h2>Video Meeting</h2>
+        <input type="text" id="username" placeholder="Enter your name" required>
+        <input type="text" id="roomId" placeholder="Enter room code" required>
+        <button onclick="joinRoom()">Join Meeting</button>
+    </div>
+
+    <div id="main-content" class="hidden">
+        <div id="participant-count">
+            <i class="fas fa-users"></i>
+            <span id="count">1</span>
+        </div>
+
+        <div id="videos">
+            <div class="video-container" id="local-video-container">
+                <video id="localVideo" autoplay playsinline muted></video>
+                <div class="username-label" id="local-username"></div>
+            </div>
+        </div>
+
+        <div id="controls">
+            <button class="control-button active" id="audioBtn" onclick="toggleAudio()">
+                <i class="fas fa-microphone"></i>
+            </button>
+            <button class="control-button active" id="videoBtn" onclick="toggleVideo()">
+                <i class="fas fa-video"></i>
+            </button>
+            <button class="control-button leave" onclick="leaveRoom()">
+                <i class="fas fa-phone-slash"></i>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const clientId = Math.random().toString(36).substr(2, 9);
+        let localStream;
+        let peers = {};
+        let ws;
+        let username = '';
+        let audioEnabled = true;
+        let videoEnabled = true;
+
+        const config = {
+            iceServers: [{
+                urls: ['stun:stun.l.google.com:19302']
+            }]
+        };
+
+        async function joinRoom() {
+            username = document.getElementById('username').value;
+            const roomId = document.getElementById('roomId').value;
+
+            if (!username || !roomId) {
+                alert('Name and room code are required');
+                return;
+            }
+
+            try {
+                // Get user media
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                document.getElementById('localVideo').srcObject = localStream;
+                document.getElementById('local-username').textContent = username + ' (You)';
+
+                // Show main content
+                document.getElementById('join-form').classList.add('hidden');
+                document.getElementById('main-content').classList.remove('hidden');
+
+                // Connect to WebSocket
+                ws = new WebSocket(`ws://${window.location.host}/ws?roomId=${roomId}&clientId=${clientId}`);
+
+                ws.onopen = () => {
+                    console.log('Connected to server');
+                    ws.send(JSON.stringify({
+                        type: 'join',
+                        username: username
+                    }));
+                };
+
+                ws.onmessage = handleMessage;
+
+            } catch (err) {
+                console.error('Error joining room:', err);
+                alert('Error accessing camera/microphone: ' + err.message);
+            }
+        }
+
+        function updateParticipantCount() {
+            const count = Object.keys(peers).length + 1; // +1 for local user
+            document.getElementById('count').textContent = count;
+        }
+
+        function toggleAudio() {
+            const btn = document.getElementById('audioBtn');
+            audioEnabled = !audioEnabled;
+            localStream.getAudioTracks().forEach(track => {
+                track.enabled = audioEnabled;
+            });
+            btn.className = `control-button ${audioEnabled ? 'active' : 'inactive'}`;
+            btn.innerHTML = `<i class="fas fa-${audioEnabled ? 'microphone' : 'microphone-slash'}"></i>`;
+        }
+
+        function toggleVideo() {
+            const btn = document.getElementById('videoBtn');
+            videoEnabled = !videoEnabled;
+            localStream.getVideoTracks().forEach(track => {
+                track.enabled = videoEnabled;
+            });
+            btn.className = `control-button ${videoEnabled ? 'active' : 'inactive'}`;
+            btn.innerHTML = `<i class="fas fa-${videoEnabled ? 'video' : 'video-slash'}"></i>`;
+        }
+
+        function leaveRoom() {
+            if (ws) {
+                ws.close();
+            }
+            Object.values(peers).forEach(pc => pc.close());
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+            }
+            window.location.reload();
+        }
+
+        async function handleMessage(event) {
+            const message = JSON.parse(event.data);
+            console.log('Received message:', message);
+
+            switch (message.type) {
+                case 'new-peer':
+                    await createPeerConnection(message.from, message.username);
+                    const offer = await peers[message.from].createOffer();
+                    await peers[message.from].setLocalDescription(offer);
+                    ws.send(JSON.stringify({
+                        type: 'offer',
+                        to: message.from,
+                        payload: offer,
+                        username: username
+                    }));
+                    updateParticipantCount();
+                    break;
+
+                case 'offer':
+                    if (!peers[message.from]) {
+                        await createPeerConnection(message.from, message.username);
+                    }
+                    await peers[message.from].setRemoteDescription(new RTCSessionDescription(message.payload));
+                    const answer = await peers[message.from].createAnswer();
+                    await peers[message.from].setLocalDescription(answer);
+                    ws.send(JSON.stringify({
+                        type: 'answer',
+                        to: message.from,
+                        payload: answer,
+                        username: username
+                    }));
+                    updateParticipantCount();
+                    break;
+
+                case 'answer':
+                    await peers[message.from].setRemoteDescription(new RTCSessionDescription(message.payload));
+                    break;
+
+                case 'candidate':
+                    if (peers[message.from]) {
+                        await peers[message.from].addIceCandidate(new RTCIceCandidate(message.payload));
+                    }
+                    break;
+
+                case 'peer-left':
+                    if (peers[message.from]) {
+                        peers[message.from].close();
+                        delete peers[message.from];
+                        const container = document.getElementById(`video-container-${message.from}`);
+                        if (container) container.remove();
+                        updateParticipantCount();
+                    }
+                    break;
+            }
+        }
+
+        async function createPeerConnection(peerId, peerUsername) {
+            const pc = new RTCPeerConnection(config);
+            peers[peerId] = pc;
+
+            // Add local tracks
+            localStream.getTracks().forEach(track => {
+                pc.addTrack(track, localStream);
+            });
+
+            // Handle ICE candidates
+            pc.onicecandidate = event => {
+                if (event.candidate) {
+                    ws.send(JSON.stringify({
+                        type: 'candidate',
+                        to: peerId,
+                        payload: event.candidate,
+                        username: username
+                    }));
+                }
+            };
+
+            // Handle remote tracks
+            pc.ontrack = event => {
+                let container = document.getElementById(`video-container-${peerId}`);
+                if (!container) {
+                    container = document.createElement('div');
+                    container.id = `video-container-${peerId}`;
+                    container.className = 'video-container';
+
+                    const video = document.createElement('video');
+                    video.id = `video-${peerId}`;
+                    video.autoplay = true;
+                    video.playsinline = true;
+
+                    const label = document.createElement('div');
+                    label.className = 'username-label';
+                    label.textContent = peerUsername || 'Unknown';
+
+                    container.appendChild(video);
+                    container.appendChild(label);
+                    document.getElementById('videos').appendChild(container);
+                }
+
+                const video = document.getElementById(`video-${peerId}`);
+                if (video) {
+                    video.srcObject = event.streams[0];
+                }
+            };
+
+            return pc;
+        }
+
+        // Handle page unload
+        window.onbeforeunload = leaveRoom;
+    </script>
+</body>
+
+</html>
